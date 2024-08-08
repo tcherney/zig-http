@@ -15,14 +15,23 @@ pub const HttpServer = struct {
         return HttpServer{ .socket = try tcp_socket.TCPSocket.init(address, port), .thread_pool = thread_pool, .allocator = allocator };
     }
 
+    pub fn handle_request(_: *HttpServer) []const u8 {
+        return "HTTP/1.1 200 OK\r\nServer: Zig Server\r\nContent-Type: text/html\r\n\r\n<html><body><h1>hello world</h1></body></html>";
+    }
     pub fn handle_client(self: *HttpServer, client: *tcp_socket.TCPSocket) void {
         defer self.deinit_client(client);
         var buffer: [1024]u8 = undefined;
-        const bytes = client.receive(&buffer) catch {
+        var bytes = client.receive(&buffer) catch {
             std.debug.print("Error recieving data\n", .{});
             return;
         };
         std.debug.print("received {d} bytes: {s}\n", .{ bytes, buffer });
+        const response = self.handle_request();
+        bytes = client.send(response) catch {
+            std.debug.print("Error sending data\n", .{});
+            return;
+        };
+        std.debug.print("sent {d} bytes {s}\n", .{ bytes, response });
     }
 
     pub fn deinit_client(self: *HttpServer, client: *tcp_socket.TCPSocket) void {

@@ -35,6 +35,10 @@ pub const TCPSocket = struct {
         return try std.posix.recvfrom(self.socket, data, 0, null, null);
     }
 
+    pub fn send(self: *const TCPSocket, data: []const u8) !usize {
+        return try std.posix.send(self.socket, data, 0);
+    }
+
     pub fn close(self: *const TCPSocket) void {
         std.posix.close(self.socket);
     }
