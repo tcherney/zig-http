@@ -8,17 +8,23 @@ pub const HttpServer = struct {
     thread_pool: *std.Thread.Pool = undefined,
     is_running: bool = true,
     allocator: std.mem.Allocator = undefined,
+    endpoints: std.StringHashMap(Endpoint) = undefined,
+
+    pub const Endpoint = struct {
+        valid_requests: u9 = undefined,
+        route: []const u8 = undefined,
+    };
 
     pub const Request = struct {
         headers: std.StringHashMap([]const u8) = undefined,
         request_type: Request_Type = undefined,
         allocator: std.mem.Allocator = undefined,
-        requested_data: []const u8 = undefined,
+        route: []const u8 = undefined,
         body: std.ArrayList(u8) = undefined,
 
-        pub const Request_Type = enum {
-            GET,
-            POST,
+        pub const Request_Type = enum(u9) {
+            GET = 0x1,
+            POST = 0x2,
             NOT_IMPLMENTED,
         };
 
@@ -46,7 +52,7 @@ pub const HttpServer = struct {
             } else {
                 self.request_type = Request_Type.NOT_IMPLMENTED;
             }
-            self.requested_data = start_line_parts.next().?;
+            self.route = start_line_parts.next().?;
             if (!std.mem.eql(u8, start_line_parts.next().?, "HTTP/1.1\r")) {
                 return Error.MALFORMED_REQUEST;
             }
@@ -71,19 +77,57 @@ pub const HttpServer = struct {
                     _ = try self.body.writer().write(header.?);
                 }
             }
-            std.debug.print("Request object {}\n", .{self});
+            //std.debug.print("Request object {}\n", .{self});
         }
     };
 
     pub fn init(address: []const u8, port: u16, allocator: std.mem.Allocator) !HttpServer {
         var thread_pool: *std.Thread.Pool = try allocator.create(std.Thread.Pool);
         try thread_pool.init(.{ .allocator = allocator, .n_jobs = NUM_THREADS });
-        return HttpServer{ .socket = try tcp_socket.TCPSocket.init(address, port), .thread_pool = thread_pool, .allocator = allocator };
+        return HttpServer{ .socket = try tcp_socket.TCPSocket.init(address, port), .thread_pool = thread_pool, .allocator = allocator, .endpoints = std.StringHashMap(Endpoint).init(allocator) };
     }
 
-    pub fn handle_request(_: *HttpServer) []const u8 {
-        return "HTTP/1.1 200 OK\r\nServer: Zig Server\r\nContent-Type: text/html\r\n\r\n<html><body><h1>hello world</h1></body></html>";
+    pub fn add_endpoint(self: *HttpServer, route: []const u8, valid_requests: u9) !void {
+        try self.endpoints.put(route, Endpoint{ .valid_requests = valid_requests, .route = route });
     }
+
+    pub fn handle_request(self: *HttpServer, request: Request) !std.ArrayList(u8) {
+        std.debug.print("request {s}, {}\n", .{ request.route, request.request_type });
+        var response: std.ArrayList(u8) = std.ArrayList(u8).init(self.allocator);
+        const endpoint = self.endpoints.get(request.route);
+        // 404
+        if (endpoint == null) {
+            _ = try response.writer().write("HTTP/1.1 404 Not Found\r\n");
+        }
+        // 405
+        else if (endpoint.?.valid_requests & @intFromEnum(request.request_type) == 0) {
+            _ = try response.writer().write("HTTP/1.1 405 Method Not Allowed\r\n");
+        }
+        switch (request.request_type) {
+            .GET => {
+                var file_name: []const u8 = "index.html";
+                if (!std.mem.eql(u8, request.route, "/")) {
+                    file_name = request.route[1..];
+                }
+                const file = std.fs.cwd().openFile(file_name, .{}) catch {
+                    // 404
+                    _ = try response.writer().write("HTTP/1.1 404 Not Found\r\n");
+                    return response;
+                };
+                defer file.close();
+                const size_limit = std.math.maxInt(u32);
+                const buffer = try file.readToEndAlloc(self.allocator, size_limit);
+                _ = try response.writer().write("HTTP/1.1 200 OK\r\nServer: Zig Server\r\nContent-Type: text/html\r\n\r\n");
+                _ = try response.writer().write(buffer);
+                self.allocator.free(buffer);
+            },
+            .POST => {},
+            .NOT_IMPLMENTED => {},
+        }
+        //_ = try response.writer().write("HTTP/1.1 200 OK\r\nServer: Zig Server\r\nContent-Type: text/html\r\n\r\n<html><body><h1>hello world</h1></body></html>");
+        return response;
+    }
+
     pub fn handle_client(self: *HttpServer, client: *tcp_socket.TCPSocket) void {
         defer self.deinit_client(client);
         var buffer: [1024]u8 = undefined;
@@ -97,12 +141,17 @@ pub const HttpServer = struct {
             std.debug.print("Error parsing request {}\n", .{err});
             return;
         };
-        const response = self.handle_request();
-        bytes = client.send(response) catch {
-            std.debug.print("Error sending data\n", .{});
-            return;
-        };
-        //std.debug.print("sent {d} bytes {s}\n", .{ bytes, response });
+        const response = self.handle_request(request);
+        if (response) |value| {
+            bytes = client.send(value.items) catch {
+                std.debug.print("Error sending data\n", .{});
+                return;
+            };
+            std.debug.print("sent {d} bytes {s}\n", .{ bytes, value.items });
+            value.deinit();
+        } else |err| {
+            std.debug.print("Error handling request {}\n", .{err});
+        }
     }
 
     pub fn deinit_client(self: *HttpServer, client: *tcp_socket.TCPSocket) void {
@@ -115,6 +164,7 @@ pub const HttpServer = struct {
         self.thread_pool.deinit();
         self.socket.close();
         self.allocator.destroy(self.thread_pool);
+        self.endpoints.deinit();
     }
 
     pub fn start(self: *HttpServer) !void {
@@ -133,6 +183,8 @@ test "echo" {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
     var server = try HttpServer.init("127.0.0.1", 8888, allocator);
+    try server.add_endpoint("/", @intFromEnum(HttpServer.Request.Request_Type.GET));
+    try server.add_endpoint("/index.html", @intFromEnum(HttpServer.Request.Request_Type.GET));
     std.debug.print("{}", .{server});
     try server.start();
 }
