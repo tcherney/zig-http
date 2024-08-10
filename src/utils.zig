@@ -63,14 +63,13 @@ pub const Request = struct {
         while (header != null and header.?.len > 1) : (header = lines.next()) {
             //std.debug.print("parsing header {s}\n", .{header.?});
             //std.debug.print("with len {d}\n", .{header.?.len});
-            const index = std.mem.indexOf(u8, header.?, ":").?;
-            try self.headers.put(header.?[0..index], header.?[index + 1 ..]);
-        }
-        if (header == null) {
-            return Error.MALFORMED_REQUEST;
+            const index = std.mem.indexOf(u8, header.?, " ").?;
+            //std.debug.print("{s} key\r\n", .{header.?[0 .. index - 1]});
+            //std.debug.print("{s}\r\n", .{header.?[index + 1 ..]});
+            try self.headers.put(header.?[0 .. index - 1], header.?[index + 1 ..]);
         }
         // parse body
-        else {
+        if (header != null) {
             //std.debug.print("parsing body\n", .{});
             self.body = std.ArrayList(u8).init(self.allocator);
             header = lines.next();

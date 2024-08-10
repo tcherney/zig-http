@@ -4,6 +4,7 @@ pub const Endpoints: []const utils.Endpoint = &[2]utils.Endpoint{ utils.Endpoint
 pub var counter: u32 = 0;
 
 pub fn home(args: utils.Endpoint.ArgParams) ?[]u8 {
+    std.debug.print("sending home page\n", .{});
     return std.fmt.allocPrint(args.allocator, "<html><body><h1>hello world</h1></body></html>", .{}) catch {
         return null;
     };
