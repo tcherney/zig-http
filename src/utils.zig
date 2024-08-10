@@ -7,10 +7,12 @@ pub const Endpoint = struct {
     payload: PayloadType = undefined,
     pub const ArgParams = struct {
         params: [][]const u8 = undefined,
+        buffer: []u8 = undefined,
+        allocator: std.mem.Allocator = undefined,
     };
     pub const PayloadType = union {
         file_name: []const u8,
-        function: *const fn (ArgParams) []const u8,
+        function: *const fn (ArgParams) ?[]u8,
     };
 };
 

@@ -59,7 +59,13 @@ pub const HttpServer = struct {
                     self.allocator.free(buffer);
                 } else if (self.using_zerver) {
                     _ = try response.writer().write("HTTP/1.1 200 OK\r\nServer: Zig Server\r\nContent-Type: text/html\r\n\r\n");
-                    _ = try response.writer().write(endpoint.?.payload.function(.{}));
+                    const payload_res: ?[]u8 = endpoint.?.payload.function(.{ .allocator = self.allocator });
+                    if (payload_res != null) {
+                        _ = try response.writer().write(payload_res.?);
+                        self.allocator.free(payload_res.?);
+                    } else {
+                        _ = try response.writer().write("HTTP/1.1 500 Internal Server Error\r\n");
+                    }
                 } else {
                     _ = try response.writer().write("HTTP/1.1 500 Internal Server Error\r\n");
                 }
